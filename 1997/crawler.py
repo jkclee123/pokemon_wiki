@@ -5,9 +5,8 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import inch
 import time
 import re
 from urllib.parse import unquote
@@ -110,41 +109,29 @@ def get_episode_content(url):
         print(f"Error fetching {url}: {e}")
         return f"Error: {str(e)}"
 
-def create_pdf(texts, output_file):
-    # Try multiple Chinese fonts that might be available on macOS
+def load_chinese_font():
+    """Load and register Chinese font."""
     chinese_fonts = [
         '/System/Library/Fonts/STHeiti Light.ttc',
         '/System/Library/Fonts/STHeiti Medium.ttc',
         '/Library/Fonts/Arial Unicode.ttf',
     ]
     
-    font_name = None
     for font_path in chinese_fonts:
         try:
             if os.path.exists(font_path):
                 pdfmetrics.registerFont(TTFont('Chinese', font_path))
-                font_name = 'Chinese'
                 print(f"Successfully loaded Chinese font: {font_path}")
-                break
+                return 'Chinese'
         except Exception as e:
             print(f"Failed to load font {font_path}: {e}")
             continue
 
-    if not font_name:
-        print("Warning: No Chinese font loaded. Text may not display correctly.")
-        font_name = 'Helvetica'
+    print("Warning: No Chinese font loaded. Text may not display correctly.")
+    return 'Helvetica'
 
-    # Create the document
-    doc = SimpleDocTemplate(
-        output_file,
-        pagesize=A4,
-        rightMargin=48,
-        leftMargin=48,
-        topMargin=48,
-        bottomMargin=48
-    )
-
-    # Create styles
+def create_pdf_styles(font_name):
+    """Create and return PDF styles."""
     title_style = ParagraphStyle(
         'title',
         fontName=font_name,
@@ -176,29 +163,69 @@ def create_pdf(texts, output_file):
         alignment=4,
     )
 
-    # Create the story (content)
+    return title_style, normal_style, summary_style
+
+def format_episode_content(text, title_style, normal_style, summary_style):
+    """Format a single episode's content into PDF elements."""
     story = []
+    sections = text.split('\n')
     
-    for text in texts:
-        # Split into sections
-        sections = text.split('\n')
-        
-        for i, section in enumerate(sections):
-            if section.strip():
-                if i == 0:  # First line (episode number)
-                    story.append(Paragraph(section, title_style))
-                elif section.startswith('摘要') or section.startswith('主要事件'):
-                    story.append(Paragraph(section, summary_style))
-                elif section.startswith('•'):
-                    # Indent bullet points
-                    story.append(Paragraph('    ' + section, normal_style))
-                else:
-                    story.append(Paragraph(section, normal_style))
+    for i, section in enumerate(sections):
+        if section.strip():
+            if i == 0:  # First line (episode number)
+                story.append(Paragraph(section, title_style))
+            elif section.startswith('摘要') or section.startswith('主要事件'):
+                story.append(Paragraph(section, summary_style))
+            elif section.startswith('•'):
+                # Indent bullet points
+                story.append(Paragraph('    ' + section, normal_style))
+            else:
+                story.append(Paragraph(section, normal_style))
 
-        # Add more space between episodes
-        story.append(Spacer(1, 30))
+    # Add space between episodes
+    story.append(Spacer(1, 30))
+    return story
 
-    # Build the PDF
+def create_pdf_document(output_file):
+    """Create and setup PDF document with styles."""
+    # Load font
+    font_name = load_chinese_font()
+
+    # Create document
+    doc = SimpleDocTemplate(
+        output_file,
+        pagesize=A4,
+        rightMargin=48,
+        leftMargin=48,
+        topMargin=48,
+        bottomMargin=48
+    )
+
+    # Create styles
+    styles = create_pdf_styles(font_name)
+    
+    return doc, styles
+
+def build_episode_story(text, styles, is_first=False):
+    """Build story elements for a single episode."""
+    story = []
+    if not is_first:
+        # Add page break between episodes
+        story.append(PageBreak())
+    
+    story.extend(format_episode_content(text, *styles))
+    return story
+
+def process_url_batch(urls, start_idx, doc, styles, total_urls):
+    """Process a batch of URLs and write to PDF."""
+    story = []
+    for i, url in enumerate(urls, start_idx):
+        print(f"Processing URL {i}/{total_urls}: {url}")
+        content = get_episode_content(url)
+        story.extend(build_episode_story(content, styles, is_first=(i==1)))
+        print(f"Processed episode {i}")
+    
+    print(f"Building PDF for episodes {start_idx}-{start_idx + len(urls) - 1}...")
     doc.build(story)
 
 def main():
@@ -213,19 +240,24 @@ def main():
     with open(urls_file, 'r', encoding='utf-8') as f:
         urls = [line.strip() for line in f if line.strip()]
     
-    print(f"Found {len(urls)} URLs to process")
+    total_urls = len(urls)
+    print(f"Found {total_urls} URLs to process")
     
-    # Get paragraphs for each URL
-    paragraphs = []
-    for i, url in enumerate(urls, 1):
-        print(f"Processing URL {i}/{len(urls)}: {url}")
-        paragraph = get_episode_content(url)
-        paragraphs.append(paragraph)
+    # Process URLs in batches of 10
+    BATCH_SIZE = 10
+    for batch_start in range(0, total_urls, BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, total_urls)
+        batch_urls = urls[batch_start:batch_end]
+        
+        # Create new PDF document for each batch
+        batch_output = output_file.replace('.pdf', f'_part{batch_start//BATCH_SIZE + 1}.pdf')
+        doc, styles = create_pdf_document(batch_output)
+        
+        # Process batch
+        process_url_batch(batch_urls, batch_start + 1, doc, styles, total_urls)
+        print(f"Completed batch {batch_start//BATCH_SIZE + 1}")
     
-    # Create final PDF
-    print(f"Creating final PDF: {output_file}")
-    create_pdf(paragraphs, output_file)
-    print("PDF creation completed!")
+    print("All batches completed!")
 
 if __name__ == '__main__':
     main()
