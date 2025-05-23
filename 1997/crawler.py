@@ -11,6 +11,10 @@ from reportlab.lib.units import inch
 import time
 import re
 from urllib.parse import unquote
+from opencc import OpenCC
+
+# Initialize OpenCC converter
+cc = OpenCC('s2t')  # Simplified to Traditional
 
 def parse_episode_text(url):
     """Extract episode text from URL like '第{N}集'"""
@@ -48,7 +52,7 @@ def get_summary_section(soup):
         current = current.find_next_sibling()
     
     # Join the paragraphs with newlines
-    summary_text =  "\n".join(summary_list) if summary_list else None
+    summary_text = "\n".join(summary_list) if summary_list else None
     return summary_text
 
 def get_main_events(soup):
@@ -98,8 +102,9 @@ def get_episode_content(url):
         main_events = get_main_events(soup)
         events_text = "\n• " + "\n• ".join(main_events) if main_events else "No main events found."
         
-        # Combine the texts
-        return f"{episode_text}\n{first_text}\n摘要\n{summary_text}\n主要事件：\n{events_text}"
+        # Convert all text to Traditional Chinese at once
+        content = f"{episode_text}\n{first_text}\n摘要\n{summary_text}\n主要事件：\n{events_text}"
+        return cc.convert(content)
             
     except Exception as e:
         print(f"Error fetching {url}: {e}")
