@@ -1,11 +1,10 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, KeepTogether
 from reportlab.lib.styles import ParagraphStyle
 import time
 import re
@@ -206,14 +205,63 @@ def create_pdf_document(output_file):
     
     return doc, styles
 
-def build_episode_story(text, styles, is_first=False):
+def build_episode_story(text, styles):
     """Build story elements for a single episode."""
     story = []
-    if not is_first:
-        # Add page break between episodes
-        story.append(PageBreak())
+    sections = text.split('\n')
     
-    story.extend(format_episode_content(text, *styles))
+    # Group content by sections
+    title = None
+    intro = []
+    summary = []
+    events = []
+    
+    current_section = intro
+    for section in sections:
+        if not section.strip():
+            continue
+            
+        if title is None:
+            # First non-empty section is title
+            title = section
+        elif section.startswith('摘要'):
+            current_section = summary
+        elif section.startswith('主要事件'):
+            current_section = events
+        else:
+            current_section.append(section)
+    
+    # Add title
+    if title:
+        story.append(Paragraph(title, styles[0]))  # title_style
+        story.append(Spacer(1, 12))
+    
+    # Add introduction
+    for line in intro:
+        story.append(Paragraph(line, styles[1]))  # normal_style
+    story.append(Spacer(1, 12))
+    
+    # Add summary section
+    if summary:
+        story.append(Paragraph('摘要', styles[2]))  # summary_style
+        story.append(Spacer(1, 6))
+        for line in summary:
+            story.append(Paragraph(line, styles[1]))
+        story.append(Spacer(1, 12))
+    
+    # Add events section
+    if events:
+        story.append(Paragraph('主要事件：', styles[2]))
+        story.append(Spacer(1, 6))
+        for line in events:
+            if line.startswith('•'):
+                story.append(Paragraph('    ' + line, styles[1]))
+            else:
+                story.append(Paragraph(line, styles[1]))
+    
+    # Add space between episodes
+    story.append(Spacer(1, 30))
+    
     return story
 
 def process_url_batch(urls, start_idx, doc, styles, total_urls):
@@ -222,19 +270,22 @@ def process_url_batch(urls, start_idx, doc, styles, total_urls):
     for i, url in enumerate(urls, start_idx):
         print(f"Processing URL {i}/{total_urls}: {url}")
         content = get_episode_content(url)
-        story.extend(build_episode_story(content, styles, is_first=(i==1)))
-        print(f"Processed episode {i}")
+        story.extend(build_episode_story(content, styles))
     
     print(f"Building PDF for episodes {start_idx}-{start_idx + len(urls) - 1}...")
     doc.build(story)
 
 def main():
-    # Get the project root directory
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Get the project root directory and current season from directory name
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    season = os.path.basename(current_dir)
     
     # Read URLs from file
-    urls_file = os.path.join(project_root, '1997', 'urls.txt')
-    output_file = os.path.join(project_root, '1997', '1997_episodes.pdf')
+    urls_file = os.path.join(current_dir, 'urls.txt')
+    pdf_dir = os.path.join(current_dir, 'pdf')
+    
+    # Ensure pdf directory exists
+    os.makedirs(pdf_dir, exist_ok=True)
     
     print(f"Reading URLs from: {urls_file}")
     with open(urls_file, 'r', encoding='utf-8') as f:
@@ -250,7 +301,7 @@ def main():
         batch_urls = urls[batch_start:batch_end]
         
         # Create new PDF document for each batch
-        batch_output = output_file.replace('.pdf', f'_part{batch_start//BATCH_SIZE + 1}.pdf')
+        batch_output = os.path.join(pdf_dir, f'{season}_episodes_part{batch_start//BATCH_SIZE + 1}.pdf')
         doc, styles = create_pdf_document(batch_output)
         
         # Process batch
