@@ -10,6 +10,7 @@ import time
 import re
 from urllib.parse import unquote
 from opencc import OpenCC
+import argparse
 
 # Initialize OpenCC converter
 cc = OpenCC('s2t')  # Simplified to Traditional
@@ -276,13 +277,26 @@ def process_url_batch(urls, start_idx, doc, styles, total_urls):
     doc.build(story)
 
 def main():
-    # Get the project root directory and current season from directory name
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    season = os.path.basename(current_dir)
+    # Set up command line argument parsing
+    parser = argparse.ArgumentParser(description='Generate PDFs from Pokemon episode summaries.')
+    parser.add_argument('season', help='The season folder to process (e.g., "1997" or "advanced_generation")')
+    args = parser.parse_args()
+    
+    # Get the project root directory (where crawler.py is located)
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    season_dir = os.path.join(root_dir, args.season)
+    
+    if not os.path.exists(season_dir):
+        print(f"Error: Season directory '{args.season}' not found")
+        return
     
     # Read URLs from file
-    urls_file = os.path.join(current_dir, 'urls.txt')
-    pdf_dir = os.path.join(current_dir, 'pdf')
+    urls_file = os.path.join(season_dir, 'urls.txt')
+    if not os.path.exists(urls_file):
+        print(f"Error: URLs file not found in '{args.season}' directory")
+        return
+    
+    pdf_dir = os.path.join(season_dir, 'pdf')
     
     # Ensure pdf directory exists
     os.makedirs(pdf_dir, exist_ok=True)
@@ -294,14 +308,14 @@ def main():
     total_urls = len(urls)
     print(f"Found {total_urls} URLs to process")
     
-    # Process URLs in batches of 10
-    BATCH_SIZE = 10
+    # Process URLs in batches of 20
+    BATCH_SIZE = 20
     for batch_start in range(0, total_urls, BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, total_urls)
         batch_urls = urls[batch_start:batch_end]
         
         # Create new PDF document for each batch
-        batch_output = os.path.join(pdf_dir, f'{season}_episodes_part{batch_start//BATCH_SIZE + 1}.pdf')
+        batch_output = os.path.join(pdf_dir, f'{args.season}_episodes_part{batch_start//BATCH_SIZE + 1}.pdf')
         doc, styles = create_pdf_document(batch_output)
         
         # Process batch
