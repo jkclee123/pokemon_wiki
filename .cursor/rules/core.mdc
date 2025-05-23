@@ -1,0 +1,7 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- always run python with `uv run`
+- always run pip with `uv pip`
