@@ -5,7 +5,7 @@ import sys
 def generate_urls():
     base_url = 'https://wiki.52poke.com/wiki/'
     urls = []
-    for i in range(1, 193):  # Advanced Generation has 192 episodes
+    for i in range(1, 192):  # Advanced Generation has 191 episodes
         title = f'宝可梦_超世代_第{i}集'
         full_url = base_url + urllib.parse.quote(title)
         urls.append(full_url)
