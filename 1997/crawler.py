@@ -5,7 +5,19 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
 import time
+import re
+
+def parse_episode_number(url):
+    """Extract full episode text (e.g., '第123集') from URL like 'https://wiki.52poke.com/wiki/宝可梦_第{N}集'"""
+    pattern = r'(第\d+集)'
+    match = re.search(pattern, url)
+    if match:
+        return match.group(1)
+    return None
 
 def get_first_paragraph_text(soup):
     """Extract the first paragraph text from the soup."""
@@ -51,11 +63,7 @@ def get_episode_content(url):
         summary_texts = get_summary_section(soup)
         
         # Combine the texts
-        if summary_texts:
-            summary = "\n\n".join(summary_texts)
-            return f"{first_text}\n\n摘要：\n{summary}"
-        else:
-            return f"{first_text}\n\nNo summary section found."
+        return f"{first_text}\n\n摘要{summary_texts}"
             
     except Exception as e:
         print(f"Error fetching {url}: {e}")
@@ -70,7 +78,7 @@ def create_pdf(texts, output_file):
         '/Library/Fonts/Arial Unicode.ttf',
     ]
     
-    font_name = 'Helvetica'  # Default fallback
+    font_name = None
     for font_path in chinese_fonts:
         try:
             if os.path.exists(font_path):
@@ -82,77 +90,51 @@ def create_pdf(texts, output_file):
             print(f"Failed to load font {font_path}: {e}")
             continue
 
-    if font_name == 'Helvetica':
-        print("Warning: Using Helvetica font. Chinese characters may not display correctly.")
+    if not font_name:
+        print("Warning: No Chinese font loaded. Text may not display correctly.")
+        font_name = 'Helvetica'
 
-    c = canvas.Canvas(output_file, pagesize=A4)
-    width, height = A4
+    # Create the document
+    doc = SimpleDocTemplate(
+        output_file,
+        pagesize=A4,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+
+    # Create styles
+    normal_style = ParagraphStyle(
+        'normal',
+        fontName=font_name,
+        fontSize=10,
+        leading=14,  # Line height
+        wordWrap='CJK',  # Special wrapping for Chinese text
+        alignment=4,  # Left alignment
+    )
+
+    # Create the story (content)
+    story = []
     
-    # Set font and size
-    c.setFont(font_name, 10)
-    
-    y = height - 50  # Start from top with margin
-    line_height = 15
-    
-    for i, text in enumerate(texts, 1):
-        if y < 50:  # If near bottom of page, create new page
-            c.showPage()
-            y = height - 50
-            c.setFont(font_name, 10)
+    for text in texts:
+        # Split into paragraphs
+        paragraphs = text.split('\n')
         
-        # Add episode number and text
-        episode_text = f"{text}"
+        for p in paragraphs:
+            if p.strip():
+                # Replace newlines with <br/> for PDF
+                p = p.replace('\n', '<br/>')
+                # Create paragraph with style
+                story.append(Paragraph(p, normal_style))
+            # Add space between paragraphs
+            story.append(Spacer(1, 12))
         
-        # Split text into lines that fit the page width
-        # For Chinese text, we'll split by characters if needed
-        if font_name == 'Helvetica':
-            # For non-Chinese font, split by words
-            words = episode_text.split()
-            current_line = []
-            for word in words:
-                test_line = ' '.join(current_line + [word])
-                if c.stringWidth(test_line, font_name, 10) < width - 100:
-                    current_line.append(word)
-                else:
-                    if current_line:
-                        c.drawString(50, y, ' '.join(current_line))
-                        y -= line_height
-                        current_line = [word]
-                    else:
-                        c.drawString(50, y, word)
-                        y -= line_height
-                        current_line = []
-                
-                if y < 50:
-                    c.showPage()
-                    y = height - 50
-                    c.setFont(font_name, 10)
-            
-            if current_line:
-                c.drawString(50, y, ' '.join(current_line))
-                y -= line_height * 2
-        else:
-            # For Chinese font, we'll draw character by character if needed
-            x = 50
-            for char in episode_text:
-                char_width = c.stringWidth(char, font_name, 10)
-                if x + char_width > width - 50:
-                    y -= line_height
-                    x = 50
-                    if y < 50:
-                        c.showPage()
-                        y = height - 50
-                        c.setFont(font_name, 10)
-                c.drawString(x, y, char)
-                x += char_width
-            y -= line_height * 2
-        
-        if y < 50:  # Check if we need a new page
-            c.showPage()
-            y = height - 50
-            c.setFont(font_name, 10)
-    
-    c.save()
+        # Add more space between episodes
+        story.append(Spacer(1, 20))
+
+    # Build the PDF
+    doc.build(story)
 
 def main():
     # Get the project root directory
@@ -174,11 +156,6 @@ def main():
         print(f"Processing URL {i}/{len(urls)}: {url}")
         paragraph = get_episode_content(url)
         paragraphs.append(paragraph)
-        
-        # Save progress every 10 episodes
-        if i % 10 == 0:
-            print(f"Saving progress... ({i}/{len(urls)} episodes processed)")
-            create_pdf(paragraphs, output_file)
     
     # Create final PDF
     print(f"Creating final PDF: {output_file}")
