@@ -13,7 +13,7 @@ import re
 from urllib.parse import unquote
 
 def parse_episode_text(url):
-    """Extract episode number from URL like 'https://wiki.52poke.com/wiki/宝可梦_第{N}集'"""
+    """Extract episode text from URL like '第{N}集'"""
     decoded_url = unquote(url)
     pattern = r'(第\d+集)'
     match = re.search(pattern, decoded_url)
@@ -38,16 +38,43 @@ def get_summary_section(soup):
         return None
         
     # Get all paragraphs between this h2 and the next h2
-    summary_texts = []
+    summary_list = []
     current = summary_h2.find_next_sibling()
     while current and current.name != 'h2':
         if current.name == 'p':
             text = current.text.strip()
             if text:  # Only add non-empty paragraphs
-                summary_texts.append(text)
+                summary_list.append(text)
         current = current.find_next_sibling()
     
-    return summary_texts if summary_texts else None
+    # Join the paragraphs with newlines
+    summary_text =  "\n".join(summary_list) if summary_list else None
+    return summary_text
+
+def get_main_events(soup):
+    """Extract the main events section (主要事件) and its bullet points."""
+    # Find the main events section (h2 with span id "主要事件")
+    events_h2 = soup.find('span', id='.E4.B8.BB.E8.A6.81.E4.BA.8B.E4.BB.B6')
+    if not events_h2:
+        return None
+    
+    events_h2 = events_h2.find_parent('h2')
+    if not events_h2:
+        return None
+        
+    # Get the ul that follows this h2
+    ul = events_h2.find_next_sibling('ul')
+    if not ul:
+        return None
+    
+    # Extract all list items
+    events = []
+    for li in ul.find_all('li', recursive=False):
+        event_text = li.get_text(strip=True)
+        if event_text:
+            events.append(event_text)
+    
+    return events if events else None
 
 def get_episode_content(url):
     """Get both first paragraph and summary section for an episode."""
@@ -64,10 +91,15 @@ def get_episode_content(url):
         first_text = get_first_paragraph_text(soup)
         
         # Get the summary section
-        summary_texts = get_summary_section(soup)
+        summary_text = get_summary_section(soup)
+        summary_text = summary_text if summary_text else "No summary found."
+
+        # Get main events
+        main_events = get_main_events(soup)
+        events_text = "\n• " + "\n• ".join(main_events) if main_events else "No main events found."
         
         # Combine the texts
-        return f"{episode_text}\n{first_text}\n\n摘要\n{summary_texts}"
+        return f"{episode_text}\n{first_text}\n摘要\n{summary_text}\n主要事件：\n{events_text}"
             
     except Exception as e:
         print(f"Error fetching {url}: {e}")
@@ -76,7 +108,6 @@ def get_episode_content(url):
 def create_pdf(texts, output_file):
     # Try multiple Chinese fonts that might be available on macOS
     chinese_fonts = [
-        '/System/Library/Fonts/PingFang.ttc',
         '/System/Library/Fonts/STHeiti Light.ttc',
         '/System/Library/Fonts/STHeiti Medium.ttc',
         '/Library/Fonts/Arial Unicode.ttf',
@@ -102,40 +133,65 @@ def create_pdf(texts, output_file):
     doc = SimpleDocTemplate(
         output_file,
         pagesize=A4,
-        rightMargin=72,
-        leftMargin=72,
-        topMargin=72,
-        bottomMargin=72
+        rightMargin=48,
+        leftMargin=48,
+        topMargin=48,
+        bottomMargin=48
     )
 
     # Create styles
+    title_style = ParagraphStyle(
+        'title',
+        fontName=font_name,
+        fontSize=12,
+        leading=16,  # Line spacing for title
+        spaceAfter=12,  # Space after title
+        alignment=1,  # Center alignment
+    )
+
     normal_style = ParagraphStyle(
         'normal',
         fontName=font_name,
         fontSize=10,
-        leading=14,  # Line height
-        wordWrap='CJK',  # Special wrapping for Chinese text
+        leading=14,  # Line spacing for normal text
+        spaceBefore=6,  # Space before paragraph
+        spaceAfter=6,  # Space after paragraph
+        wordWrap='CJK',
         alignment=4,  # Left alignment
+    )
+
+    summary_style = ParagraphStyle(
+        'summary',
+        fontName=font_name,
+        fontSize=10,
+        leading=14,  # Line spacing for summary
+        spaceBefore=12,  # More space before summary section
+        spaceAfter=6,
+        wordWrap='CJK',
+        alignment=4,
     )
 
     # Create the story (content)
     story = []
     
     for text in texts:
-        # Split into paragraphs
-        paragraphs = text.split('\n')
+        # Split into sections
+        sections = text.split('\n')
         
-        for p in paragraphs:
-            if p.strip():
-                # Replace newlines with <br/> for PDF
-                p = p.replace('\n', '<br/>')
-                # Create paragraph with style
-                story.append(Paragraph(p, normal_style))
-            # Add space between paragraphs
-            story.append(Spacer(1, 12))
-        
+        for i, section in enumerate(sections):
+            if section.strip():
+                if i == 0:  # First line (episode number)
+                    story.append(Paragraph(section, title_style))
+                elif section.startswith('摘要') or section.startswith('主要事件'):
+                    story.append(Paragraph(section, summary_style))
+                elif section.startswith('•'):
+                    # Indent bullet points
+                    story.append(Paragraph('    ' + section, normal_style))
+                else:
+                    story.append(Paragraph(section, normal_style))
+
         # Add more space between episodes
-        story.append(Spacer(1, 20))
+        story.append(Spacer(1, 30))
 
     # Build the PDF
     doc.build(story)
@@ -146,7 +202,7 @@ def main():
     
     # Read URLs from file
     urls_file = os.path.join(project_root, '1997', 'urls.txt')
-    output_file = os.path.join(project_root, '1997', 'pokemon_episodes.pdf')
+    output_file = os.path.join(project_root, '1997', '1997_episodes.pdf')
     
     print(f"Reading URLs from: {urls_file}")
     with open(urls_file, 'r', encoding='utf-8') as f:
