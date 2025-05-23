@@ -10,11 +10,13 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 import time
 import re
+from urllib.parse import unquote
 
-def parse_episode_number(url):
-    """Extract full episode text (e.g., '第123集') from URL like 'https://wiki.52poke.com/wiki/宝可梦_第{N}集'"""
+def parse_episode_text(url):
+    """Extract episode number from URL like 'https://wiki.52poke.com/wiki/宝可梦_第{N}集'"""
+    decoded_url = unquote(url)
     pattern = r'(第\d+集)'
-    match = re.search(pattern, url)
+    match = re.search(pattern, decoded_url)
     if match:
         return match.group(1)
     return None
@@ -55,6 +57,8 @@ def get_episode_content(url):
         response = requests.get(url)
         response.encoding = 'utf-8'  # Ensure proper encoding for Chinese characters
         soup = BeautifulSoup(response.text, 'html.parser')
+
+        episode_text = parse_episode_text(url)
         
         # Get the first paragraph
         first_text = get_first_paragraph_text(soup)
@@ -63,7 +67,7 @@ def get_episode_content(url):
         summary_texts = get_summary_section(soup)
         
         # Combine the texts
-        return f"{first_text}\n\n摘要{summary_texts}"
+        return f"{episode_text}\n{first_text}\n\n摘要\n{summary_texts}"
             
     except Exception as e:
         print(f"Error fetching {url}: {e}")
